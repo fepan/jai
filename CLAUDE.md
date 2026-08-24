@@ -1,168 +1,86 @@
 # jai
 
-## Development Workflow
+Go CLI that syncs Jira Cloud to local SQLite and exposes it via SQL, CLI, and TUI.
 
-- Use **conventional commits** message format (e.g., `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`)
-- Create a commit after every meaningful change
-- Proceed with implementation **autonomously** unless you hit a roadblock or have a question
-- Implement as many tasks **in parallel** as feasible
-- Track all work in **Beads** (`bd`) — see `.beads/` directory
-
-## Code Navigation: Prefer LSP
-
-When working in any codebase with LSP support (Go, Python, Rust, TypeScript, etc.), always try LSP first before falling back to Grep or Read.
-
-### Reading / Understanding Code
-
-1. **To find a definition** — use `goToDefinition`, not `grep "func MyFunc"` or `grep "class MyClass"`
-2. **To find all usages** — use `findReferences`, not `grep "MyFunc"`
-3. **To trace call chains** — use `incomingCalls` / `outgoingCalls`, not grep-based manual tracing
-4. **To check a type or signature** — use `hover`, not reading the entire file
-5. **To list symbols in a file** — use `documentSymbol`, not skimming with Read
-6. **To search symbols across the workspace** — use `workspaceSymbol`, not Glob + Grep
-7. **To find interface implementations** — use `goToImplementation`, not grepping for method names
-
-### When Grep / Glob / Read Are Still Appropriate
-
-- Initial search when you have no file/line/column coordinates yet
-- Searching for non-symbol strings: error messages, config values, comments, TODOs
-- Searching across files by content pattern (e.g. "all files importing X")
-- Reading documentation, config files, or non-code files
-- When LSP is unavailable or returns no results for the given file type
-
-### Workflow
-
-1. Start with Grep/Glob only to locate the first relevant file and symbol
-2. Once you have a file + line + column, switch to LSP for all further navigation
-3. Use LSP to build the full picture (definitions, references, call hierarchy) before proposing changes
-
----
-
-## Autonomous Execution
-
-- Work **autonomously** through all Beads tasks until everything is complete or you hit a genuine blocker
-- Use `bd ready --json` to find the next actionable task; claim it with `bd update <id> --status in_progress`
-- Close each task with `bd close <id> --reason "..." --suggest-next --json` and immediately continue with the suggested next task
-- Only stop to ask the user if you hit an external dependency (missing credentials, ambiguous requirement, unresolvable conflict)
-- **Parallelize aggressively**: spin up multiple sub-agents (via the Agent tool) for independent tasks in the same phase — e.g. all Phase 1 tasks (config, DB, Jira client, sync engine, query engine) can be implemented simultaneously
-- Each sub-agent should: claim its Beads task, implement it, write tests, run them, commit, then close the task
-- Coordinate via Beads: check `bd list --status=in_progress --json` before starting a task to avoid duplicate work
-
-## Project Context
-
-**jai** is a Go CLI tool that syncs Jira Cloud data to a local SQLite database and exposes it via SQL queries, a hybrid CLI, and a full-screen TUI.
-
-**Tagline**: "Query Jira with SQL"
-
-**Core loop**: `jai sync` → `jai query` → `jai tui`
-
-**Target users**: AI agents (compact JSON output, schema introspection, 10-50x token savings) and humans (full-screen TUI as Jira Plan replacement)
-
-**Tech stack**:
-- Language: Go
-- CLI: cobra
-- TUI: bubbletea + lipgloss + bubbles
-- DB: mattn/go-sqlite3 with CGO + FTS5 (`-tags fts5`)
-- Config: YAML with `${ENV_VAR}` substitution
-- Auth: Jira Cloud API Token + email (Basic auth)
-- Distribution: Homebrew single binary, CGO cross-compiled via `zig cc`
-
-**Key architectural decisions**:
-- DB-first: SQLite is the single source of truth; no command hits Jira API directly for reads
-- All fields downloaded as raw JSON and denormalized into queryable columns — no resync needed for new fields
-- Write operations push to Jira immediately by default; use `--queue` to defer to `pending_changes` table and `jai push`
-- Custom field names auto-discovered from Jira's field metadata API and stored in `field_map` table
-- FTS5 virtual table (`issues_fts`) with porter unicode61 tokenizer for full-text search
-- WAL mode + pragmas for concurrent read/write performance
-
-**Project structure** (per `docs/spec.md`):
-```
-cmd/jai/main.go
-internal/
-  cli/        — cobra commands (get, query, search, view, sync, push, set, comment, fields, schema, status, init, tui)
-  config/     — YAML loading, env var substitution, view definitions, defaults
-  db/         — connection, schema, migrations, upserts, pending_changes, field_map
-  jira/       — HTTP client, pagination, ADF→plaintext, write operations
-  sync/       — incremental/full sync, denormalization, deletion detection, write queue processor
-  query/      — SQL execution, template variable resolution, result formatting
-  tui/        — bubbletea app, table, tabs, filter, grouping, hierarchy, detail pane, colors, sync
-  output/     — compact JSON (agent mode), lipgloss tables (human mode), schema introspection
-```
-
-**Implementation phases** (tracked in Beads — `bd ready --json` for next tasks):
-- Phase 1: Foundation — sync, query, get (core data loop)
-- Phase 2: Agent Mode — --json, --fields, jai schema, jai fields, auto-sync
-- Phase 3: TUI — full-screen views, sorting, filtering, grouping, background sync
-- Phase 4: Write Path — jai set, jai comment, jai push, write-through default with --queue opt-in
-- Phase 5: Polish — jai init wizard, FTS5 search, color rules, default views, error UX
-- Phase 6: Release — README, Homebrew, CI/CD, vhs demo
-
-**Output format** (agent mode `--json`):
-- Single item: `{"ok":true,"data":{...}}`
-- Query results: `{"ok":true,"columns":[...],"rows":[...],"count":N}`
-- Error: `{"ok":false,"error":{"type":"...","message":"..."}}`
-
-Reference docs (read before implementing any feature):
-- `docs/idea.md` — Polished idea, high level overview
-- `docs/spec.md` — Go data models, full API surface, TUI design, sync engine
-- `docs/plan.md` — phased task breakdown (source of truth for what to build)
-- `docs/research.md` — prior art, language/approach decisions
-
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ccf33ec3 -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
-
-### Quick Reference
+## Build & Test
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>         # Complete work
+make build                              # compile ./jai (requires CGO + fts5)
+make test                               # go test -tags fts5 ./...
+make vet                                # go vet
+make check                              # vet + test
+make lint                               # golangci-lint (v2, config in .golangci.yml)
 ```
 
-### Rules
+**Critical**: ALL go commands need `-tags fts5` — the SQLite schema uses FTS5 virtual tables. Without it, tests fail with `no such module: fts5`. The Makefile handles this automatically.
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
-- Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+To run a single package's tests:
+```bash
+go test -tags fts5 ./internal/db/...
+go test -tags fts5 -run TestFunctionName ./internal/cli/...
+```
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+## Code Style
+
+- **Conventional commits**: `feat:`, `fix:`, `chore:`, `refactor:`, `test:`, `docs:`
+- **Linter**: govet, staticcheck, unused, ineffassign (see `.golangci.yml`)
+- **Error handling**: Return `fmt.Errorf("context: %w", err)` — wrap, don't swallow
+- **Output modes**: All commands support `--json` for agent consumption. Human output uses lipgloss tables. Use `output.JSON()`/`output.Table()` from `internal/output/`
+- **Write operations**: Default is write-through to Jira. `--queue` defers to `pending_changes` table, flushed by `jai push`
+
+## Architecture
+
+```
+cmd/jai/main.go          → entrypoint
+internal/
+  cli/                   → cobra commands (one file per command)
+  config/                → YAML config with ${ENV_VAR} substitution
+  db/                    → SQLite: schema, migrations, upserts, field_map
+  jira/                  → HTTP client, pagination, ADF→plaintext, writes
+  sync/                  → incremental/full sync, denormalization, deletions
+  query/                 → SQL execution, template vars, result formatting
+  tui/                   → bubbletea full-screen app
+  output/                → JSON/table formatting, schema introspection
+```
+
+**DB-first**: SQLite is the source of truth for reads. No read command hits Jira directly. All Jira fields stored as raw JSON and denormalized into queryable columns. Custom field names auto-discovered via `field_map` table.
+
+**Reference docs** (read before implementing features):
+- `docs/spec.md` — data models, API surface, TUI design, sync engine
+- `docs/plan.md` — phased task breakdown (source of truth for what to build)
+- `docs/idea.md` — high-level overview and motivation
+
+## Development Workflow
+
+- Proceed **autonomously** unless you hit a genuine blocker
+- Implement independent tasks **in parallel** using sub-agents
+- Create a commit after every meaningful change
+- Track work in **Beads** (`bd`) — run `bd ready` for next tasks
+
+## Code Navigation
+
+Prefer **LSP** over grep/read once you have file coordinates:
+
+| Task | Use | Not |
+|------|-----|-----|
+| Find definition | `goToDefinition` | `grep "func X"` |
+| Find all usages | `findReferences` | `grep "X"` |
+| Trace call chains | `incomingCalls`/`outgoingCalls` | manual grep |
+| Check type/signature | `hover` | reading whole file |
+| List file symbols | `documentSymbol` | skimming with Read |
+| Workspace symbol search | `workspaceSymbol` | Glob + Grep |
+| Find implementations | `goToImplementation` | grep method names |
+
+Grep is still right for: initial search without coordinates, error messages, config values, comments, non-code files.
 
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+Work is **not done** until `git push` succeeds.
 
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd dolt push
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-- **SSH fallback**: If `git push` fails with SSH key errors, switch to HTTPS via `gh`:
-  ```bash
-  gh config set git_protocol https
-  git remote set-url origin https://github.com/sthadka/jai.git
-  git push
-  # Restore SSH after:
-  gh config set git_protocol ssh
-  git remote set-url origin git@github.com:sthadka/jai.git
-  ```
-<!-- END BEADS INTEGRATION -->
+```bash
+make check                    # tests + vet pass
+git add <files> && git commit -m "feat: ..."
+git pull --rebase
+bd dolt push
+git push
+```
