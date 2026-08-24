@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -20,6 +21,10 @@ var getCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		key := args[0]
+
+		if g.rawOut {
+			return getRaw(cmd, key)
+		}
 
 		results, err := g.query.Execute("SELECT * FROM issues WHERE key = ?", key)
 		if err != nil {
@@ -103,6 +108,40 @@ var getCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func getRaw(cmd *cobra.Command, key string) error {
+	results, err := g.query.Execute("SELECT raw_json FROM issues WHERE key = ?", key)
+	if err == nil && len(results.Rows) > 0 {
+		if raw := output.ValueStr(results.Rows[0][0]); raw != "" {
+			printRaw([]byte(raw))
+			return nil
+		}
+	}
+	issue, err := g.jira.GetIssue(cmd.Context(), key)
+	if err != nil {
+		if g.jsonOut {
+			fmt.Println(string(output.Err("NotFoundError", err.Error())))
+			return nil
+		}
+		return fmt.Errorf("issue %s not found: %w", key, err)
+	}
+	b, _ := json.Marshal(issue)
+	printRaw(b)
+	return nil
+}
+
+func printRaw(data []byte) {
+	if g.jsonOut {
+		fmt.Println(string(output.OK(json.RawMessage(data))))
+		return
+	}
+	var compacted bytes.Buffer
+	if err := json.Compact(&compacted, data); err != nil {
+		fmt.Println(string(data))
+		return
+	}
+	fmt.Println(compacted.String())
 }
 
 // frontMatterEntries defines the curated, ordered fields for YAML front matter.

@@ -20,6 +20,7 @@ type globals struct {
 	cfgPath string
 	dbPath  string
 	jsonOut bool
+	rawOut  bool
 	noSync  bool
 	fields  string
 
@@ -191,6 +192,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&g.cfgPath, "config", "", "config file (default: ~/.config/jai/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&g.dbPath, "db", "", "database file path")
 	rootCmd.PersistentFlags().BoolVar(&g.jsonOut, "json", false, "output as JSON")
+	rootCmd.PersistentFlags().BoolVar(&g.rawOut, "raw", false, "dump full Jira API JSON (get, query --jql)")
 	rootCmd.PersistentFlags().BoolVar(&g.noSync, "no-sync", false, "skip auto-sync")
 	rootCmd.PersistentFlags().StringVar(&g.fields, "fields", "", "comma-separated field names to include in output")
 }

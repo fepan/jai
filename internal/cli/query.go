@@ -25,7 +25,13 @@ var queryCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if queryJQL != "" {
+			if g.rawOut {
+				return runJQLQueryRaw(queryJQL)
+			}
 			return runJQLQuery(queryJQL)
+		}
+		if g.rawOut {
+			return fmt.Errorf("--raw is only supported with --jql")
 		}
 		return runSQLQuery(args[0])
 	},
@@ -90,6 +96,36 @@ func runJQLQuery(jql string) error {
 		return nil
 	}
 	fmt.Print(output.Table(cols, rows))
+	return nil
+}
+
+func runJQLQueryRaw(jql string) error {
+	var issues []*jira.Issue
+	for page, err := range g.jira.SearchAll(context.Background(), jql, []string{"*all"}) {
+		if err != nil {
+			if g.jsonOut {
+				fmt.Println(string(output.Err("JQLError", err.Error())))
+				return nil
+			}
+			return fmt.Errorf("jql query: %w", err)
+		}
+		issues = append(issues, page...)
+	}
+
+	if g.jsonOut {
+		b, _ := json.Marshal(issues)
+		result := map[string]interface{}{
+			"ok":    true,
+			"data":  json.RawMessage(b),
+			"count": len(issues),
+		}
+		out, _ := json.Marshal(result)
+		fmt.Println(string(out))
+		return nil
+	}
+
+	b, _ := json.Marshal(issues)
+	fmt.Println(string(b))
 	return nil
 }
 
